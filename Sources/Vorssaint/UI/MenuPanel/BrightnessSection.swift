@@ -106,12 +106,12 @@ struct BrightnessSection: View {
                         .buttonStyle(.link)
                     }
                     DisplayBrightnessShortcutControls()
-                    Toggle("Volume keys control monitor speakers", isOn: $ddcVolumeEnabled)
+                    Toggle(strings.speakersToggle, isOn: $ddcVolumeEnabled)
                         .onChange(of: ddcVolumeEnabled) { _, isOn in
                             if isOn { permissions.requestAccessibility() }
                             DDCVolumeService.shared.syncWithPreferences()
                         }
-                    Text("When sound plays through a monitor over DisplayPort or HDMI, the volume and mute keys set the monitor's own speaker volume over DDC. Step size and volume limits are in Settings → Displays.")
+                    Text(strings.speakersCaption)
                         .font(.system(size: 9.5))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

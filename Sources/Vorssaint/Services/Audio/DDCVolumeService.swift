@@ -201,10 +201,17 @@ final class DDCVolumeService {
             if accepted {
                 self.levels[display] = (current: value, maximum: maximum)
                 let muted = self.mute[display]?.isMuted ?? false
-                BrightnessOSD.show(displayID: display,
-                                   brightness: DDCVolumeSupport.level(value: value, maximum: maximum),
-                                   symbol: Self.symbol(value: value, maximum: maximum, muted: muted),
-                                   routesToNotch: false)
+                let level = DDCVolumeSupport.level(value: value, maximum: maximum)
+                // The Dynamic Island shows the level when it handles volume,
+                // just as it does for brightness; otherwise the overlay does.
+                if AppFeature.notch.isAvailable, NotchSupport.routes(.volume),
+                   NotchService.shared.showVolume(level, muted: muted) {
+                    // Shown in the island.
+                } else {
+                    BrightnessOSD.show(displayID: display, brightness: level,
+                                       symbol: Self.symbol(value: value, maximum: maximum, muted: muted),
+                                       routesToNotch: false)
+                }
             } else {
                 // A rejected write means the channel changed under us; read
                 // it fresh next time.

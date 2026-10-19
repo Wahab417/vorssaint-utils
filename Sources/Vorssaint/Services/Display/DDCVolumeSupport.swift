@@ -22,12 +22,6 @@ enum DDCVolumeSupport {
         return min(max(percent, 0.25), 25)
     }
 
-    static func stepLabel(_ percent: Double) -> String {
-        percent == defaultStepPercent
-            ? "6.25% (like macOS)"
-            : "\(Int(percent.rounded()))%"
-    }
-
     /// The range the volume keys may move in, as percentages of the
     /// monitor's own range. Mute still writes zero below the minimum.
     struct VolumeLimits: Equatable {

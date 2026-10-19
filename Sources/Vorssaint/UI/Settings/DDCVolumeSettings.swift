@@ -6,17 +6,20 @@ import SwiftUI
 /// Settings for the volume keys driving a monitor's own speakers over DDC:
 /// the switch, how far one press moves, and the range the keys stay in.
 struct DDCVolumeSettingsCard: View {
+    @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var permissions = Permissions.shared
     @AppStorage(DefaultsKey.ddcVolumeEnabled) private var enabled = false
     @AppStorage(DefaultsKey.ddcVolumeStep) private var step = DDCVolumeSupport.defaultStepPercent
     @AppStorage(DefaultsKey.ddcVolumeMinimum) private var minimum = 0
     @AppStorage(DefaultsKey.ddcVolumeMaximum) private var maximum = 100
 
+    private var strings: BrightnessFeatureStrings { FeatureStrings.brightness(l10n.language) }
+
     var body: some View {
-        SettingsCard(title: "Monitor speakers") {
-            SettingsRow(symbol: "hifispeaker.fill", title: "Volume keys control monitor speakers",
-                        caption: "When sound plays through a monitor over DisplayPort or HDMI, the volume and mute keys set the monitor's own speaker volume over DDC. Needs display control above to be on.") {
-                Toggle("Volume keys control monitor speakers", isOn: $enabled)
+        SettingsCard(title: strings.speakersTitle) {
+            SettingsRow(symbol: "hifispeaker.fill", title: strings.speakersToggle,
+                        caption: strings.speakersCaption) {
+                Toggle(strings.speakersToggle, isOn: $enabled)
                     .labelsHidden()
                     .onChange(of: enabled) { _, isOn in
                         if isOn { permissions.requestAccessibility() }
@@ -25,24 +28,26 @@ struct DDCVolumeSettingsCard: View {
             }
             if enabled {
                 Divider()
-                SettingsRow(symbol: "plusminus", title: "Volume step",
-                            caption: "How much one press changes the volume. Hold Option-Shift for a quarter of this.") {
-                    Picker("Volume step", selection: stepBinding) {
+                SettingsRow(symbol: "plusminus", title: strings.speakersStep,
+                            caption: strings.speakersStepCaption) {
+                    Picker(strings.speakersStep, selection: stepBinding) {
                         ForEach(DDCVolumeSupport.stepChoices, id: \.self) { choice in
-                            Text(DDCVolumeSupport.stepLabel(choice)).tag(choice)
+                            Text(choice == DDCVolumeSupport.defaultStepPercent
+                                 ? strings.speakersStepStandard
+                                 : "\(Int(choice.rounded()))%").tag(choice)
                         }
                     }
                     .pickerStyle(.menu)
                     .labelsHidden()
                     .fixedSize()
                 }
-                SettingsRow(symbol: "speaker.fill", title: "Minimum volume",
-                            caption: "Volume down stops here. Mute still silences the monitor.") {
-                    limitControl(title: "Minimum volume", value: minimumBinding, range: 0...95)
+                SettingsRow(symbol: "speaker.fill", title: strings.speakersMinimum,
+                            caption: strings.speakersMinimumCaption) {
+                    limitControl(title: strings.speakersMinimum, value: minimumBinding, range: 0...95)
                 }
-                SettingsRow(symbol: "speaker.wave.3.fill", title: "Maximum volume",
-                            caption: "Volume up stops here.") {
-                    limitControl(title: "Maximum volume", value: maximumBinding, range: 5...100)
+                SettingsRow(symbol: "speaker.wave.3.fill", title: strings.speakersMaximum,
+                            caption: strings.speakersMaximumCaption) {
+                    limitControl(title: strings.speakersMaximum, value: maximumBinding, range: 5...100)
                 }
                 if !permissions.accessibility {
                     PermissionRow(kind: .accessibility)
