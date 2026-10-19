@@ -37,6 +37,7 @@ final class DDCVolumeService {
     private var mute: [CGDirectDisplayID: DDCVolumeSupport.MuteState] = [:]
     private var inFlight = Set<CGDirectDisplayID>()
     private var pendingSteps: [CGDirectDisplayID: (steps: Int, fine: Bool)] = [:]
+    private var pendingMute = Set<CGDirectDisplayID>()
     private var keyOwnership = DDCVolumeSupport.KeyOwnership()
 
     private init() {
@@ -45,6 +46,17 @@ final class DDCVolumeService {
 
     var isEnabled: Bool {
         UserDefaults.standard.bool(forKey: DefaultsKey.ddcVolumeEnabled)
+    }
+
+    /// Read at each key press, so Settings changes apply to the next press.
+    private var stepPercent: Double {
+        DDCVolumeSupport.sanitizedStep(UserDefaults.standard.double(forKey: DefaultsKey.ddcVolumeStep))
+    }
+
+    private var limits: DDCVolumeSupport.VolumeLimits {
+        let defaults = UserDefaults.standard
+        return .sanitized(minimum: defaults.integer(forKey: DefaultsKey.ddcVolumeMinimum),
+                          maximum: defaults.integer(forKey: DefaultsKey.ddcVolumeMaximum))
     }
 
     func syncWithPreferences() {
@@ -64,6 +76,7 @@ final class DDCVolumeService {
         levels.removeAll()
         mute.removeAll()
         pendingSteps.removeAll()
+        pendingMute.removeAll()
         inFlight.removeAll()
         keyOwnership.reset()
     }
@@ -103,6 +116,9 @@ final class DDCVolumeService {
             return Unmanaged.passUnretained(event)
         }
         keyOwnership.claim(press.key)
+        // A held mute key repeats; one press is one toggle, as with the
+        // system's own mute.
+        if press.key == .mute, press.isRepeat { return nil }
         let fine = event.flags.contains(.maskAlternate) && event.flags.contains(.maskShift)
         // Never hold the tap's reply for DDC work; it runs on the brightness
         // queue with the pacing monitors need.
@@ -131,19 +147,27 @@ final class DDCVolumeService {
             var muteState = self.mute[display] ?? DDCVolumeSupport.MuteState()
             let from = muteState.unmuteForStep(current: level.current)
             self.mute[display] = muteState
+            let step = fine ? self.stepPercent / 4 : self.stepPercent
             let value = DDCVolumeSupport.steppedValue(current: from, maximum: level.maximum,
-                                                      direction: steps, fine: fine)
+                                                      direction: steps, stepPercent: step,
+                                                      limits: self.limits)
             self.write(value, maximum: level.maximum, to: display)
         }
     }
 
     private func toggleMute(_ display: CGDirectDisplayID) {
-        guard !inFlight.contains(display) else { return }
+        if inFlight.contains(display) {
+            // A mute pressed while a volume write is on the bus runs right
+            // after it instead of being dropped. A second press cancels it.
+            if pendingMute.remove(display) == nil { pendingMute.insert(display) }
+            return
+        }
         inFlight.insert(display)
         withLevel(display) { [weak self] level in
             guard let self else { return }
             var muteState = self.mute[display] ?? DDCVolumeSupport.MuteState()
-            let value = muteState.toggle(current: level.current, maximum: level.maximum)
+            let value = muteState.toggle(current: level.current, maximum: level.maximum,
+                                         stepPercent: self.stepPercent, limits: self.limits)
             self.mute[display] = muteState
             self.write(value, maximum: level.maximum, to: display)
         }
@@ -187,7 +211,9 @@ final class DDCVolumeService {
                 self.levels.removeValue(forKey: display)
                 self.mute.removeValue(forKey: display)
             }
-            if let pending = self.pendingSteps.removeValue(forKey: display), pending.steps != 0 {
+            if self.pendingMute.remove(display) != nil {
+                self.toggleMute(display)
+            } else if let pending = self.pendingSteps.removeValue(forKey: display), pending.steps != 0 {
                 self.step(display, by: pending.steps, fine: pending.fine)
             }
         }

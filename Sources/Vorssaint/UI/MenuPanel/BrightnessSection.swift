@@ -111,7 +111,7 @@ struct BrightnessSection: View {
                             if isOn { permissions.requestAccessibility() }
                             DDCVolumeService.shared.syncWithPreferences()
                         }
-                    Text("When sound plays through a monitor over DisplayPort or HDMI, the volume and mute keys set the monitor's own speaker volume over DDC. Uses the same connection as the brightness sliders above.")
+                    Text("When sound plays through a monitor over DisplayPort or HDMI, the volume and mute keys set the monitor's own speaker volume over DDC. Step size and volume limits are in Settings → Displays.")
                         .font(.system(size: 9.5))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

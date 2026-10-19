@@ -11,10 +11,40 @@ enum DDCVolumeSupport {
     /// VCP code for audio speaker volume in the DDC/CI standard.
     static let volumeCode: UInt8 = 0x62
 
-    /// macOS moves the system volume in sixteen steps; Option-Shift moves it
-    /// in quarter steps. Monitor speakers follow the same grid.
-    static let stepsPerRange = 16.0
-    static let fineStepsPerRange = 64.0
+    /// The step a volume key moves, as a percentage of the monitor's range.
+    /// 6.25% is the sixteen steps macOS uses for its own volume; Option-Shift
+    /// moves a quarter of whichever step is chosen.
+    static let defaultStepPercent = 6.25
+    static let stepChoices: [Double] = [1, 2, 3, 5, 6.25, 10]
+
+    static func sanitizedStep(_ percent: Double) -> Double {
+        guard percent.isFinite, percent > 0 else { return defaultStepPercent }
+        return min(max(percent, 0.25), 25)
+    }
+
+    static func stepLabel(_ percent: Double) -> String {
+        percent == defaultStepPercent
+            ? "6.25% (like macOS)"
+            : "\(Int(percent.rounded()))%"
+    }
+
+    /// The range the volume keys may move in, as percentages of the
+    /// monitor's own range. Mute still writes zero below the minimum.
+    struct VolumeLimits: Equatable {
+        let minimumPercent: Int
+        let maximumPercent: Int
+
+        static let full = VolumeLimits(minimumPercent: 0, maximumPercent: 100)
+
+        /// Keeps 0 <= minimum < maximum <= 100. A missing or zero maximum
+        /// reads as 100, since a ceiling of silence would make the keys
+        /// pointless; a minimum at or above the maximum yields to it.
+        static func sanitized(minimum: Int, maximum: Int) -> VolumeLimits {
+            let upper = maximum <= 0 ? 100 : min(maximum, 100)
+            let lower = min(max(minimum, 0), upper - 1)
+            return VolumeLimits(minimumPercent: lower, maximumPercent: upper)
+        }
+    }
 
     /// CoreAudio transport types of audio carried over a display cable
     /// ('dprt' and 'hdmi'), spelled out so this file needs no CoreAudio.
@@ -27,16 +57,20 @@ enum DDCVolumeSupport {
         transportType == displayPortTransport || transportType == hdmiTransport
     }
 
-    /// The next value on the step grid, `direction` steps up or down. A value
-    /// between grid points snaps to the nearest one first, so a level set on
-    /// the monitor's own buttons rejoins the grid instead of drifting.
-    static func steppedValue(current: UInt16, maximum: UInt16, direction: Int, fine: Bool) -> UInt16 {
-        let maximum = BrightnessSupport.sanitizedMaximum(maximum)
-        let steps = fine ? fineStepsPerRange : stepsPerRange
-        let step = Double(maximum) / steps
-        let index = (Double(min(current, maximum)) / step).rounded() + Double(direction)
-        let value = (index * step).rounded()
-        return UInt16(min(max(value, 0), Double(maximum)))
+    /// The next value on the step grid, `direction` steps up or down, kept
+    /// inside the limits. A value between grid points snaps to the nearest
+    /// one first, so a level set on the monitor's own buttons rejoins the
+    /// grid instead of drifting. Direction zero only applies the limits.
+    static func steppedValue(current: UInt16, maximum: UInt16, direction: Int,
+                             stepPercent: Double = defaultStepPercent,
+                             limits: VolumeLimits = .full) -> UInt16 {
+        let maximum = Double(BrightnessSupport.sanitizedMaximum(maximum))
+        let step = max(maximum * sanitizedStep(stepPercent) / 100, 1)
+        let index = (min(Double(current), maximum) / step).rounded() + Double(direction)
+        let value = direction == 0 ? min(Double(current), maximum) : (index * step).rounded()
+        let lower = (maximum * Double(limits.minimumPercent) / 100).rounded()
+        let upper = (maximum * Double(limits.maximumPercent) / 100).rounded()
+        return UInt16(min(max(value, lower), upper))
     }
 
     /// 0...1 for the overlay.
@@ -81,15 +115,20 @@ enum DDCVolumeSupport {
         var isMuted: Bool { restoreValue != nil }
 
         /// The value to write for a mute toggle, given the current value.
-        mutating func toggle(current: UInt16, maximum: UInt16) -> UInt16 {
+        /// Unmuting restores the remembered level, kept inside the limits.
+        mutating func toggle(current: UInt16, maximum: UInt16,
+                             stepPercent: Double = defaultStepPercent,
+                             limits: VolumeLimits = .full) -> UInt16 {
             if let restore = restoreValue {
                 restoreValue = nil
-                return restore
+                return steppedValue(current: restore, maximum: maximum, direction: 0,
+                                    stepPercent: stepPercent, limits: limits)
             }
             // Muting from silence restores to a step rather than to nothing.
             restoreValue = current > 0
                 ? current
-                : steppedValue(current: 0, maximum: maximum, direction: 1, fine: false)
+                : steppedValue(current: 0, maximum: maximum, direction: 1,
+                               stepPercent: stepPercent, limits: limits)
             return 0
         }
 

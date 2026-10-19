@@ -9,6 +9,7 @@ import Foundation
 enum DDCVolumeSupportTests {
     static func run(_ suite: TestSuite) {
         steps(suite)
+        limits(suite)
         transport(suite)
         matching(suite)
         mute(suite)
@@ -18,26 +19,60 @@ enum DDCVolumeSupportTests {
     private static func steps(_ suite: TestSuite) {
         typealias S = DDCVolumeSupport
         suite.expect(S.volumeCode == 0x62, "speaker volume is VCP 0x62")
-        suite.expect(S.steppedValue(current: 50, maximum: 100, direction: 1, fine: false) == 56,
-                     "a step up from 50 of 100 lands on the next sixteenth (56)")
-        suite.expect(S.steppedValue(current: 50, maximum: 100, direction: -1, fine: false) == 44,
-                     "a step down from 50 of 100 lands on the previous sixteenth (44)")
-        suite.expect(S.steppedValue(current: 100, maximum: 100, direction: 1, fine: false) == 100,
+        suite.expect(S.steppedValue(current: 50, maximum: 100, direction: 1) == 56,
+                     "the default step matches macOS: 50 of 100 moves up to the next sixteenth (56)")
+        suite.expect(S.steppedValue(current: 50, maximum: 100, direction: -1) == 44,
+                     "a default step down from 50 of 100 lands on the previous sixteenth (44)")
+        suite.expect(S.steppedValue(current: 50, maximum: 100, direction: 1, stepPercent: 1) == 51,
+                     "a 1% step moves one point")
+        suite.expect(S.steppedValue(current: 50, maximum: 100, direction: -1, stepPercent: 2) == 48,
+                     "a 2% step moves two points")
+        suite.expect(S.steppedValue(current: 20, maximum: 50, direction: 1, stepPercent: 10) == 25,
+                     "steps scale with the monitor's own range")
+        suite.expect(S.steppedValue(current: 50, maximum: 100, direction: 1, stepPercent: 6.25 / 4) == 52,
+                     "Option-Shift moves a quarter of the step")
+        suite.expect(S.steppedValue(current: 10, maximum: 20, direction: 1, stepPercent: 1) == 11,
+                     "a step smaller than one device unit still moves one unit")
+        suite.expect(S.steppedValue(current: 100, maximum: 100, direction: 1) == 100,
                      "volume never passes the monitor's maximum")
-        suite.expect(S.steppedValue(current: 0, maximum: 100, direction: -1, fine: false) == 0,
+        suite.expect(S.steppedValue(current: 0, maximum: 100, direction: -1) == 0,
                      "volume never goes below zero")
-        suite.expect(S.steppedValue(current: 3, maximum: 100, direction: 1, fine: false) == 6,
+        suite.expect(S.steppedValue(current: 3, maximum: 100, direction: 1) == 6,
                      "a level off the grid snaps to the nearest step before moving")
-        suite.expect(S.steppedValue(current: 50, maximum: 100, direction: 1, fine: true) == 52,
-                     "Option-Shift moves a quarter step")
-        suite.expect(S.steppedValue(current: 50, maximum: 100, direction: 3, fine: false) == 69,
+        suite.expect(S.steppedValue(current: 50, maximum: 100, direction: 3) == 69,
                      "coalesced key repeats move several steps at once")
-        suite.expect(S.steppedValue(current: 10, maximum: 0, direction: 1, fine: false) == 19,
+        suite.expect(S.steppedValue(current: 10, maximum: 0, direction: 1) == 19,
                      "a monitor reporting no range is treated as 0-100")
-        suite.expect(S.steppedValue(current: 200, maximum: 100, direction: -1, fine: false) == 94,
+        suite.expect(S.steppedValue(current: 200, maximum: 100, direction: -1) == 94,
                      "a reading above the maximum is clamped before stepping")
+        suite.expect(S.sanitizedStep(0) == S.defaultStepPercent, "a missing step reads as the default")
+        suite.expect(S.sanitizedStep(.nan) == S.defaultStepPercent, "a broken step reads as the default")
+        suite.expect(S.sanitizedStep(90) == 25, "a step is capped at a quarter of the range")
+        suite.expect(S.stepChoices.contains(S.defaultStepPercent), "the default step is one of the choices")
         suite.expectClose(S.level(value: 25, maximum: 50), 0.5, "level is value over maximum")
         suite.expectClose(S.level(value: 80, maximum: 0), 0.8, "a missing range reads as 0-100")
+    }
+
+    private static func limits(_ suite: TestSuite) {
+        typealias S = DDCVolumeSupport
+        let range = S.VolumeLimits.sanitized(minimum: 20, maximum: 70)
+        suite.expect(S.steppedValue(current: 70, maximum: 100, direction: 1, stepPercent: 5, limits: range) == 70,
+                     "volume up stops at the maximum limit")
+        suite.expect(S.steppedValue(current: 20, maximum: 100, direction: -1, stepPercent: 5, limits: range) == 20,
+                     "volume down stops at the minimum limit")
+        suite.expect(S.steppedValue(current: 90, maximum: 100, direction: -1, stepPercent: 5, limits: range) == 70,
+                     "a level set above the limit on the monitor comes back inside it")
+        suite.expect(S.steppedValue(current: 50, maximum: 200, direction: 1, stepPercent: 5, limits: range) == 60,
+                     "limits are percentages of the monitor's own range")
+        suite.expect(S.steppedValue(current: 0, maximum: 100, direction: 0, limits: range) == 20,
+                     "direction zero only applies the limits")
+        suite.expect(S.VolumeLimits.sanitized(minimum: 80, maximum: 30)
+                        == S.VolumeLimits(minimumPercent: 29, maximumPercent: 30),
+                     "a minimum above the maximum yields to it")
+        suite.expect(S.VolumeLimits.sanitized(minimum: -5, maximum: 0) == .full,
+                     "missing limits read as the full range")
+        suite.expect(S.VolumeLimits.sanitized(minimum: 0, maximum: 400).maximumPercent == 100,
+                     "the maximum never passes 100%")
     }
 
     private static func transport(_ suite: TestSuite) {
@@ -85,6 +120,11 @@ enum DDCVolumeSupportTests {
         _ = state.toggle(current: 0, maximum: 100)
         suite.expect(state.toggle(current: 0, maximum: 100) == 6,
                      "unmuting what was muted from silence restores one step, not silence")
+
+        let range = DDCVolumeSupport.VolumeLimits.sanitized(minimum: 0, maximum: 60)
+        _ = state.toggle(current: 90, maximum: 100, limits: range)
+        suite.expect(state.toggle(current: 0, maximum: 100, limits: range) == 60,
+                     "unmuting a level above the maximum limit restores the limit instead")
     }
 
     private static func keys(_ suite: TestSuite) {
