@@ -12,14 +12,20 @@ enum BrightnessOSD {
     private static var dismissWork: DispatchWorkItem?
     private static var generation = 0
 
-    static func show(displayID: CGDirectDisplayID, brightness: Double) {
+    /// `symbol` and `routesToNotch` let other levels share the overlay: the
+    /// monitor speaker volume shows here with a speaker symbol and never
+    /// takes over the island's brightness slider.
+    static func show(displayID: CGDirectDisplayID, brightness: Double,
+                     symbol: String = BrightnessOSDView.brightnessSymbol,
+                     routesToNotch: Bool = true) {
         guard Thread.isMainThread else {
             DispatchQueue.main.async {
-                show(displayID: displayID, brightness: brightness)
+                show(displayID: displayID, brightness: brightness,
+                     symbol: symbol, routesToNotch: routesToNotch)
             }
             return
         }
-        if NotchSupport.routes(.brightness), NotchService.shared.showBrightness(brightness) {
+        if routesToNotch, NotchSupport.routes(.brightness), NotchService.shared.showBrightness(brightness) {
             return
         }
         guard let screen = NSScreen.screens.first(where: {
@@ -33,10 +39,10 @@ enum BrightnessOSD {
         let panel = ensurePanel()
         let host: NSHostingController<BrightnessOSDView>
         if let existing = Self.host {
-            existing.rootView = BrightnessOSDView(brightness: brightness)
+            existing.rootView = BrightnessOSDView(brightness: brightness, symbol: symbol)
             host = existing
         } else {
-            host = NSHostingController(rootView: BrightnessOSDView(brightness: brightness))
+            host = NSHostingController(rootView: BrightnessOSDView(brightness: brightness, symbol: symbol))
             Self.host = host
             panel.contentViewController = host
         }
@@ -129,7 +135,10 @@ enum BrightnessOSD {
 /// Kept separate from the transient panel so the mandatory UI preview can
 /// host and inspect the exact shipped surface.
 struct BrightnessOSDView: View {
+    static let brightnessSymbol = "sun.max.fill"
+
     let brightness: Double
+    var symbol: String = BrightnessOSDView.brightnessSymbol
 
     private var percentage: Int {
         BrightnessSupport.wholePercent(brightness)
@@ -141,7 +150,7 @@ struct BrightnessOSDView: View {
 
     var body: some View {
         VStack(spacing: 11) {
-            Image(systemName: "sun.max.fill")
+            Image(systemName: symbol)
                 .font(.system(size: 39, weight: .regular))
                 .symbolRenderingMode(.monochrome)
                 .foregroundStyle(.white.opacity(0.82))

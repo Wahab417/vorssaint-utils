@@ -12,6 +12,7 @@ struct BrightnessSection: View {
     @ObservedObject private var permissions = Permissions.shared
     @AppStorage(DefaultsKey.brightnessOSDEnabled) private var brightnessOSDEnabled = false
     @AppStorage(DefaultsKey.brightnessKeysEnabled) private var brightnessKeysEnabled = false
+    @AppStorage(DefaultsKey.ddcVolumeEnabled) private var ddcVolumeEnabled = false
     @State private var optionsExpanded = false
     var collapsible = true
 
@@ -105,6 +106,23 @@ struct BrightnessSection: View {
                         .buttonStyle(.link)
                     }
                     DisplayBrightnessShortcutControls()
+                    Toggle("Volume keys control monitor speakers", isOn: $ddcVolumeEnabled)
+                        .onChange(of: ddcVolumeEnabled) { _, isOn in
+                            if isOn { permissions.requestAccessibility() }
+                            DDCVolumeService.shared.syncWithPreferences()
+                        }
+                    Text("When sound plays through a monitor over DisplayPort or HDMI, the volume and mute keys set the monitor's own speaker volume over DDC. Uses the same connection as the brightness sliders above.")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if ddcVolumeEnabled, !permissions.accessibility {
+                        Button {
+                            permissions.openAccessibilitySettings()
+                        } label: {
+                            Label(l10n.s.permissionOpenSettings, systemImage: "hand.raised")
+                        }
+                        .buttonStyle(.link)
+                    }
                 }
                 .font(.system(size: 11.5, weight: .medium))
                 .toggleStyle(.checkbox)
